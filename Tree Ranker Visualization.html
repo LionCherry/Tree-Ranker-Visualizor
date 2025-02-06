@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tree Ranker Visualization</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet" type="text/css" />
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #network {
+            width: 100%;
+            height: 100%;
+            border: 1px solid lightgray;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(196, 196, 196, 0.8);
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <input type="file" id="fileInput">
+    <div id="overlay">click anywhere to load ranker</div>
+    <div id="network"></div>
+
+    <script>
+        window.onload = function() {
+            document.getElementById('fileInput').click();
+            let space = 0;
+            let s = true;
+            document.addEventListener('keydown', function(event) {
+                if (event.code === 'Space') {
+                    network.setOptions({
+                        layout: {
+                            hierarchical: {
+                                enabled: space>0,
+                                sortMethod: space==1?'hubsize':'directed'
+                            }
+                        }
+                    });
+                    space = (space + 1)%3;
+                }
+                if (event.code === 'KeyS') {
+                    network.setOptions({
+                        physics: {
+                            enabled: !s
+                        }
+                    });
+                    s = !s;
+                }
+            });
+        };
+        document.getElementById('overlay').addEventListener('click', function() {
+            document.getElementById('fileInput').click();
+        });
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const content = e.target.result;
+                    document.getElementById('overlay').innerText = 'loading';
+                    const data = parseINI(content);
+                    console.log(data)
+                    document.getElementById('overlay').innerText = 'drawing';
+                    let network = drawNetwork(data);
+                    network.on('stabilizationIterationsDone', function () {
+                        console.log('done');
+                        document.getElementById('overlay').innerText = 'click anywhere to load ranker';
+                        document.getElementById('overlay').style.display = 'none';
+                        document.getElementById('fileInput').style.display = 'true';
+                    });
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        function parseINI(content) {
+            const lines = content.split('\n');
+            const tree = {};
+            let currentSection = null;
+            let maxlength = 50;
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (line.startsWith('[') && line.endsWith(']')) {
+                    currentSection = line;//.slice(1, -1);
+                    tree[currentSection] = {'content': '', 'edge': []};
+                // } else if (currentSection && line.includes('=')) {
+                //     const [key, value] = line.split('=').map(s => s.trim());
+                //     tree[currentSection][key] = value;
+                } else if(currentSection){
+                    if(tree[currentSection]['content']!="")
+                        tree[currentSection]['content']+='\n';
+                    tree[currentSection]['content'] += line.substring(0, maxlength) + (line.length>maxlength?"...":"");
+                    // if(line.startsWith('Name=')){
+                    //     line.split('Name=', 1)[1];
+                    // }
+                    line.split(/[\s=\(\)\[\]]+/).forEach(ele =>{
+                        if(ele.includes(':')){
+                            if(ele.startsWith('E')) ele = 'Evaluator:'+ele.split(':')[1];
+                            else if(ele.startsWith('I')) ele = 'Input:'+ele.split(':')[1];
+                            else if(ele.startsWith('D')) ele = 'Data:'+ele.split(':')[1];
+                            else if(ele.startsWith('D')) ele = 'Data:'+ele.split(':')[1];
+                            tree[currentSection]['edge'].push(`[${ele}]`);
+                        }
+                    })
+                }
+            });
+            // const root = '[DNN]';
+            // Object.entries(tree).forEach(([key, val]) => {
+            //     let edges = val['edge'];
+            //     if(key!=root){
+            //         if(!key.includes('Evaluator')){
+            //             val['edge'].push(root);
+            //         }
+            //     }
+            // })
+            return tree;
+        }
+        
+        function drawNetwork(data) {
+            const nodes = [];
+            const edges = [];
+            const nodeIds = new Set();
+
+            Object.entries(data).forEach(([section, attributes]) => {
+                let color = '#ccccff'; // Default light color
+                let shape = 'circle';
+                if (false){
+                } else if (attributes['content'].includes('ExportedId=')) {
+                    color = '#ffffcc'; // Light yellow
+                    shape = 'box';
+                }
+                else if (section.includes('Data')) {
+                    color = '#e6ccff'; // Light purple
+                } else if (section.includes('Evaluator')) {
+                    color = '#ccffcc'; // Light green
+                    shape = 'box';
+                } else if (section.includes('Input')) {
+                    color = '#cce6ff'; // Light blue
+                }
+                shape = 'box';
+
+                const label = `<b>${section}</b>\n${attributes['content'].split('\n').join('\n')}`;
+
+                if (!nodeIds.has(section)) {
+                    nodes.push({ id: section, label: label, color: color,
+                        shape: shape,
+                        font:{
+                            face: 'Consolas',
+                            multi: true,
+                            align: 'left',
+                            bold: {
+                                align: 'center',
+                                color: '#000000',
+                                size: 14,
+                                face: 'arial',
+                                vadjust: 0
+                            },
+                            ital: {
+                                color: '#000000',
+                                align: 'left',
+                                size: 8,
+                                face: 'arial',
+                                vadjust: 0
+                            }
+                        },
+                    });
+                    nodeIds.add(section);
+                }
+            });
+            console.log(nodeIds);
+
+            Object.entries(data).forEach(([section, attributes]) => {
+                // console.log('Node '+section+':')
+                attributes['edge'].forEach(value => {
+                    if (nodeIds.has(value)) {
+                        edges.push({ to: section, from: value, arrows: 'to', dashes: true, width: 5});
+                    }else{
+                        console.error('missing node in edge: '+ value + ', from '+section);
+                    }
+                });
+            });
+
+            const container = document.getElementById('network');
+            const data2 = {
+                nodes: new vis.DataSet(nodes),
+                edges: new vis.DataSet(edges)
+            };
+            const options = {
+                layout: {
+                    hierarchical: {
+                        enabled: false,
+                        levelSeparation: 150,
+                        nodeSpacing: 150,
+                        treeSpacing: 200,
+                        blockShifting: true,
+                        edgeMinimization: true,
+                        parentCentralization: false,
+                        direction: 'UD',
+                        sortMethod: 'hubsize',
+                    }
+                },
+                physics: {
+                    enabled: true,
+                    barnesHut: {
+                        gravitationalConstant: -1000,
+                        centralGravity: 0.3,
+                        springLength: 150,
+                        springConstant: 0.01,
+                        avoidOverlap: 0.7
+                    },
+                    stabilization: {
+                        enabled: true,
+                        iterations: 2000,
+                        updateInterval: 25,
+                        onlyDynamicEdges: false,
+                        fit: true
+                    },
+                    maxVelocity: 30,
+                    minVelocity: 0.1,
+                    timestep: 0.5,
+                    adaptiveTimestep: true
+                }
+            };
+            network = new vis.Network(container, data2, options);
+            
+            network.on('selectNode', function (params) {
+                const selectedNode = params.nodes[0];
+                const connectedNodes = network.getConnectedNodes(selectedNode);
+                const allNodes = network.body.data.nodes.get();
+
+                allNodes.forEach(node => {
+                    if (connectedNodes.includes(node.id) || node.id === selectedNode) {
+                        // console.log(node);
+                        network.body.data.nodes.update({ id: node.id,
+                            color: node.color.substring(0,7)+'ff',
+                            font:{
+                                bold:{color:node.font.bold.color.substring(0,7)+'ff'},
+                                ital:{color:node.font.ital.color.substring(0,7)+'ff'}
+                        }});
+                    } else {
+                        network.body.data.nodes.update({ id: node.id, color: node.color.substring(0,7)+'22', font:{bold:{color:node.font.bold.color.substring(0,7)+'22'}, ital:{color:node.font.ital.color.substring(0,7)+'22'}}});
+                    }
+                });
+            });
+
+            network.on('deselectNode', function () {
+                const allNodes = network.body.data.nodes.get();
+                allNodes.forEach(node => {
+                    network.body.data.nodes.update({ id: node.id,
+                        color: node.color.substring(0,7)+'ff',
+                        font:{
+                            bold:{color:node.font.bold.color.substring(0,7)+'ff'},
+                            ital:{color:node.font.ital.color.substring(0,7)+'ff'}
+                }});
+                });
+            });
+            return network;
+        }
+    </script>
+</body>
+</html>
